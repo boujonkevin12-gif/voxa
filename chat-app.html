@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voxa</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.1/css/all.min.css">
+    <link rel="stylesheet" href="chat-style.css">
+</head>
+<body>
+    <div class="app-shell" data-view="chat">
+        <aside class="rail">
+            <button class="brand rail-nav active" type="button" data-view="chat" title="Voxa">V</button>
+            <button class="rail-btn rail-nav" type="button" data-view="chat" title="Chats"><i class="fa-solid fa-comments"></i></button>
+            <button class="rail-btn rail-nav" type="button" data-view="voice" title="Voz"><i class="fa-solid fa-headset"></i></button>
+            <button class="rail-btn rail-nav" type="button" data-view="music" title="Musica"><i class="fa-solid fa-music"></i></button>
+            <button class="rail-btn rail-nav" type="button" data-view="friends" title="Amigos"><i class="fa-solid fa-user-group"></i></button>
+            <span class="rail-spacer"></span>
+            <button class="rail-btn" id="inviteBtn" type="button" title="Copiar invitacion"><i class="fa-solid fa-link"></i></button>
+            <button class="rail-btn rail-nav" type="button" data-view="settings" title="Ajustes"><i class="fa-solid fa-gear"></i></button>
+        </aside>
+
+        <aside class="server-panel">
+            <header class="server-head">
+                <div>
+                    <span class="eyebrow">Servidor local</span>
+                    <h1>Voxa Room</h1>
+                </div>
+                <span class="live-dot" title="Online"></span>
+            </header>
+
+            <section class="mini-card">
+                <div class="mini-title"><i class="fa-solid fa-signal"></i> Estado</div>
+                <strong id="connectionText">Preparando conexion...</strong>
+                <small id="connectedCount">1 conectado</small>
+            </section>
+
+            <section class="channel-block">
+                <div class="block-label">Texto</div>
+                <button class="channel active" type="button" data-channel="general"><i class="fa-solid fa-hashtag"></i> General</button>
+                <button class="channel" type="button" data-channel="clips"><i class="fa-solid fa-hashtag"></i> Clips</button>
+                <button class="channel" type="button" data-channel="musica"><i class="fa-solid fa-hashtag"></i> Musica</button>
+                <button class="channel" type="button" data-channel="planes"><i class="fa-solid fa-hashtag"></i> Planes</button>
+            </section>
+
+            <section class="channel-block">
+                <div class="block-label">Voz</div>
+                <button class="voice-channel rail-nav" type="button" data-view="voice"><i class="fa-solid fa-volume-high"></i> Lobby de voz</button>
+                <div class="voice-members"></div>
+            </section>
+
+            <footer class="user-strip">
+                <div class="avatar self" id="selfInitial">A</div>
+                <div>
+                    <strong id="selfName">Agustin</strong>
+                    <small id="voiceStatus">Desconectado de voz</small>
+                </div>
+            </footer>
+        </aside>
+
+        <main class="main-panel">
+            <section class="view view-chat active" data-panel="chat">
+                <header class="topbar">
+                    <div>
+                        <span class="eyebrow">Canal activo</span>
+                        <h2 id="channelTitle"># general</h2>
+                    </div>
+                    <div class="top-actions">
+                        <button class="soft-action rail-nav" data-view="voice" type="button"><i class="fa-solid fa-headset"></i> Voz</button>
+                        <button class="soft-action rail-nav" data-view="music" type="button"><i class="fa-solid fa-music"></i> Musica</button>
+                    </div>
+                </header>
+
+                <div class="messages" id="messages" aria-live="polite"></div>
+
+                <form class="composer" id="messageForm">
+                    <button class="icon-action" type="button" title="Adjuntar"><i class="fa-solid fa-paperclip"></i></button>
+                    <input id="messageInput" type="text" autocomplete="off" placeholder="Escribir en # general">
+                    <button class="send-action" type="submit" title="Enviar"><i class="fa-solid fa-paper-plane"></i></button>
+                </form>
+            </section>
+
+            <section class="view view-voice" data-panel="voice">
+                <header class="topbar">
+                    <div>
+                        <span class="eyebrow">Canal de voz</span>
+                        <h2>Lobby de voz</h2>
+                    </div>
+                    <button id="callBtn" class="primary-action" type="button">Entrar a voz</button>
+                </header>
+
+                <div class="voice-stage">
+                    <div class="voice-hero">
+                        <div class="pulse-ring"><i class="fa-solid fa-microphone-lines"></i></div>
+                        <h3>Habla con tus amigos en la misma red</h3>
+                        <p id="micHelp">Si tus amigos entran desde otra PC, tienen que abrir Chrome con el acceso de microfono que genera Voxa.</p>
+                        <div class="voice-actions">
+                            <button id="muteBtn" class="control-action" type="button"><i class="fa-solid fa-microphone"></i> Microfono</button>
+                            <button id="deafenBtn" class="control-action" type="button"><i class="fa-solid fa-volume-xmark"></i> Silenciar audio</button>
+                            <button id="copyMicHelp" class="control-action" type="button"><i class="fa-solid fa-copy"></i> Copiar ayuda</button>
+                        </div>
+                    </div>
+
+                    <div class="voice-list-card">
+                        <div class="mini-title"><i class="fa-solid fa-users"></i> En la sala</div>
+                        <div id="voiceUsers" class="voice-users"></div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="view view-music" data-panel="music">
+                <header class="topbar">
+                    <div>
+                        <span class="eyebrow">Musica compartida</span>
+                        <h2>Reproductor de sala</h2>
+                    </div>
+                    <button id="focusSongInput" class="primary-action" type="button">Agregar link</button>
+                </header>
+
+                <div class="music-layout">
+                    <section class="music-player">
+                        <div class="stage-header">
+                            <div>
+                                <span class="eyebrow">Sonando ahora</span>
+                                <h2 id="songTitle">Midnight Match</h2>
+                                <p id="songArtist">Neon Route</p>
+                            </div>
+                            <div class="bars" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+                        </div>
+
+                        <div class="embed-frame" id="mediaFrame">
+                            <iframe id="youtubeFrame" title="YouTube player" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+                            <iframe id="spotifyFrame" title="Spotify player" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" loading="lazy"></iframe>
+                            <div id="demoVisualizer" class="demo-visualizer"><i class="fa-solid fa-wave-square"></i></div>
+                        </div>
+
+                        <div class="player-row">
+                            <button id="prevSong" class="icon-action" type="button" title="Anterior"><i class="fa-solid fa-backward-step"></i></button>
+                            <button id="playPause" class="play-action" type="button">Play</button>
+                            <button id="nextSong" class="icon-action" type="button" title="Siguiente"><i class="fa-solid fa-forward-step"></i></button>
+                        </div>
+
+                        <div class="time-row">
+                            <span id="currentTime">0:00</span>
+                            <input id="musicProgress" type="range" min="0" max="100" value="0">
+                            <span id="totalTime">--:--</span>
+                        </div>
+
+                        <div class="link-loader">
+                            <input id="songUrl" type="url" placeholder="Pega YouTube, Spotify o MP3 directo">
+                            <button id="loadSongBtn" type="button">Cargar</button>
+                        </div>
+
+                        <p class="player-note" id="playerNote">YouTube y Spotify se reproducen dentro de su propio reproductor. MP3 directo usa el boton Play de Voxa.</p>
+                    </section>
+
+                    <section class="queue-panel large">
+                        <div class="mini-title"><i class="fa-solid fa-list"></i> Cola compartida</div>
+                        <div class="queue-list" id="queueList"></div>
+                    </section>
+                </div>
+            </section>
+
+            <section class="view view-friends" data-panel="friends">
+                <header class="topbar">
+                    <div>
+                        <span class="eyebrow">Usuarios</span>
+                        <h2>Amigos conectados</h2>
+                    </div>
+                    <button class="primary-action" id="inviteBtnAlt" type="button">Copiar invitacion</button>
+                </header>
+                <div id="friendsList" class="friends-grid"></div>
+            </section>
+
+            <section class="view view-settings" data-panel="settings">
+                <header class="topbar">
+                    <div>
+                        <span class="eyebrow">Ajustes</span>
+                        <h2>Tu perfil</h2>
+                    </div>
+                </header>
+                <div class="settings-card">
+                    <label>
+                        Nombre
+                        <input id="nameInput" type="text" maxlength="24">
+                    </label>
+                    <button id="saveNameBtn" class="primary-action" type="button">Guardar nombre</button>
+                    <div class="invite-box">
+                        <strong>Link de sala</strong>
+                        <span id="inviteLinkText">Inicia el servidor para crear link.</span>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <aside class="right-panel">
+            <section class="mini-card now-card">
+                <div class="mini-title"><i class="fa-solid fa-record-vinyl"></i> Ahora</div>
+                <strong id="sideSongTitle">Midnight Match</strong>
+                <small id="sideSongArtist">Neon Route</small>
+                <button class="soft-action rail-nav" data-view="music" type="button">Abrir musica</button>
+            </section>
+
+            <section class="mini-card">
+                <div class="mini-title"><i class="fa-solid fa-user-group"></i> Amigos</div>
+                <div id="sideFriendsList" class="compact-list"></div>
+            </section>
+        </aside>
+    </div>
+
+    <audio id="audioPlayer" crossorigin="anonymous"></audio>
+    <div id="remoteAudio" class="remote-audio" aria-hidden="true"></div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <script src="chat-script.js"></script>
+</body>
+</html>

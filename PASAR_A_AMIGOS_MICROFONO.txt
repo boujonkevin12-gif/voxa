@@ -1,0 +1,18 @@
+PARA QUE FUNCIONE EL MICROFONO EN CHROME
+
+1. Primero abri Voxa en tu PC con iniciar-sala-pc.bat.
+2. En Voxa entra a la vista Voz.
+3. Toca Copiar ayuda.
+4. Pasale ese comando a tus amigos.
+
+El comando se ve parecido a esto:
+
+chrome.exe --user-data-dir="%TEMP%\voxa-chrome" --unsafely-treat-insecure-origin-as-secure=http://192.168.1.6:3000 http://192.168.1.6:3000/chat-app.html
+Despues cada amigo:
+
+1. Ejecuta ese comando.
+2. Toca Entrar a voz.
+3. Acepta el permiso de microfono.
+4. Habla.
+
+Si abren el link normal, el chat y la musica funcionan, pero el microfono puede quedar bloqueado por seguridad del navegador.

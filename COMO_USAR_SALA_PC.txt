@@ -1,0 +1,27 @@
+COMO USAR VOXA
+
+1. Hace doble clic en iniciar-sala-pc.bat.
+2. En tu PC abri:
+   http://localhost:3000/chat-app.html
+3. Dentro de Voxa toca el boton de link para copiar la invitacion.
+   Si estas en localhost, Voxa copia automaticamente el link con la IP de tu PC.
+4. Pasale ese link a tus amigos en la misma red WiFi/LAN.
+
+PARA PROBAR MICROFONOS
+
+- En tu PC podes tocar Entrar a voz desde localhost.
+- Tus amigos pueden abrir el link normal para chat y musica.
+- Para que Chrome permita microfono desde una IP local, tienen que abrir Chrome con el acceso especial.
+- El archivo abrir-sala-con-microfono.bat hace eso automaticamente en esta PC.
+- Para otras PC, copia desde Voxa la ayuda de microfono en la vista Voz.
+
+MUSICA
+
+- Pega un link de YouTube, Spotify o MP3 directo en la vista Musica.
+- YouTube y Spotify aparecen dentro de Voxa con su propio reproductor.
+- Spotify no deja que Voxa apriete play por vos: hay que tocar play dentro del player de Spotify.
+- Los MP3 directos usan el boton Play de Voxa.
+
+PARA CERRAR
+
+- Cerra la ventana del servidor, o finaliza el proceso de Node desde el Administrador de tareas.
