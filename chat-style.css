@@ -406,7 +406,8 @@ small,
 
 .composer input,
 .link-loader input,
-.settings-card input {
+.settings-card input,
+.join-row input {
     width: 100%;
     height: 48px;
     border: 1px solid var(--line);
@@ -419,7 +420,8 @@ small,
 
 .composer input:focus,
 .link-loader input:focus,
-.settings-card input:focus {
+.settings-card input:focus,
+.join-row input:focus {
     border-color: rgba(255, 122, 26, .75);
     box-shadow: 0 0 0 4px rgba(255, 122, 26, .13);
 }
@@ -427,6 +429,70 @@ small,
 .send-action {
     width: 48px;
     padding: 0;
+}
+
+.server-tools .soft-action {
+    justify-content: center;
+    width: 100%;
+}
+
+.join-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 46px;
+    gap: 8px;
+}
+
+.join-row input,
+.create-channel-row input {
+    height: 42px;
+    text-transform: uppercase;
+}
+
+.create-channel-row input {
+    text-transform: none;
+}
+
+.join-row button,
+.create-channel-row button {
+    display: grid;
+    place-items: center;
+    width: 46px;
+    height: 42px;
+    border-radius: 8px;
+    color: #150a06;
+    background: linear-gradient(135deg, var(--orange), #ff9f43);
+}
+
+.voice-channel.active {
+    color: var(--text);
+    background: rgba(255, 122, 26, .18);
+}
+
+.create-channel-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 46px;
+    gap: 8px;
+}
+
+.create-channel-row input {
+    width: 100%;
+    border: 1px dashed rgba(255, 122, 26, .42);
+    border-radius: 8px;
+    outline: 0;
+    color: var(--text);
+    background: rgba(255, 255, 255, .05);
+    padding: 0 12px;
+}
+
+.create-channel-row input:focus {
+    border-color: rgba(255, 122, 26, .75);
+    box-shadow: 0 0 0 4px rgba(255, 122, 26, .13);
+}
+
+.create-channel-row button {
+    border: 1px dashed rgba(255, 122, 26, .42);
+    color: var(--orange);
+    background: rgba(255, 122, 26, .11);
 }
 
 .voice-stage,

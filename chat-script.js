@@ -1,10 +1,10 @@
 const fallbackMessages = {
     general: [
-        { author: "Sistema", initial: "S", text: "Sala lista. Copia la invitacion y entra con amigos en la misma red.", time: "Ahora" }
+        { author: "Sistema", initial: "S", text: "Servidor privado listo. Comparte la invitacion para que entren tus amigos.", time: "Ahora" }
     ],
     clips: [],
     musica: [
-        { author: "Sistema", initial: "S", text: "Pega links de YouTube, Spotify o MP3 en la vista Musica.", time: "Ahora" }
+        { author: "Sistema", initial: "S", text: "La musica se escucha solamente en el canal de voz donde se reproduce.", time: "Ahora" }
     ],
     planes: []
 };
@@ -29,6 +29,7 @@ const queueList = document.getElementById("queueList");
 const playPause = document.getElementById("playPause");
 const callBtn = document.getElementById("callBtn");
 const voiceStatus = document.getElementById("voiceStatus");
+const voiceChannelTitle = document.getElementById("voiceChannelTitle");
 const connectionText = document.getElementById("connectionText");
 const connectedCount = document.getElementById("connectedCount");
 const friendsList = document.getElementById("friendsList");
@@ -49,6 +50,13 @@ const nameInput = document.getElementById("nameInput");
 const selfName = document.getElementById("selfName");
 const selfInitial = document.getElementById("selfInitial");
 const inviteLinkText = document.getElementById("inviteLinkText");
+const serverNameTitle = document.getElementById("serverNameTitle");
+const serverCodeText = document.getElementById("serverCodeText");
+const newServerBtn = document.getElementById("newServerBtn");
+const joinServerInput = document.getElementById("joinServerInput");
+const joinServerBtn = document.getElementById("joinServerBtn");
+const textChannelList = document.getElementById("textChannelList");
+const voiceChannelList = document.getElementById("voiceChannelList");
 
 const generatedTracks = [
     { bpm: 104, bass: [110, 110, 146.83, 130.81], lead: [440, 493.88, 587.33, 523.25] },
@@ -57,19 +65,34 @@ const generatedTracks = [
 ];
 
 let state = {
+    textChannels: [
+        { id: "general", name: "General" },
+        { id: "clips", name: "Clips" },
+        { id: "musica", name: "Musica" },
+        { id: "planes", name: "Planes" }
+    ],
+    voiceChannels: [
+        { id: "lobby", name: "Lobby de voz" },
+        { id: "musica", name: "Musica compartida" }
+    ],
     messages: fallbackMessages,
     songs: fallbackSongs,
     activeSong: 0,
     playing: false,
     progress: 0,
-    users: []
+    users: [],
+    voiceUsers: []
 };
 
 let activeChannel = "general";
+let activeVoiceChannel = "lobby";
 let inCall = false;
 let socket = null;
 let username = localStorage.getItem("salaPcName") || "Agustin";
 let currentUserId = "";
+let currentServerId = "";
+let currentServerName = "Voxa Room";
+let currentInviteUrl = "";
 let lastMusicSync = 0;
 let audioContext = null;
 let masterGain = null;
@@ -80,6 +103,7 @@ let peers = new Map();
 let micMuted = false;
 let audioMuted = false;
 let voxaConfig = null;
+let lastJoinMode = "auto";
 
 localStorage.setItem("salaPcName", username);
 
@@ -110,10 +134,23 @@ function sendSocket(type, payload = {}) {
     return true;
 }
 
-function networkInviteUrl() {
-    if (!location.host || location.protocol === "file:") return "Inicia el servidor para crear invitacion";
+function getRequestedServerId() {
+    const params = new URLSearchParams(location.search);
+    return (params.get("server") || localStorage.getItem("voxaServerId") || "").trim().toUpperCase();
+}
+
+function baseInviteUrl() {
+    if (!location.host || location.protocol === "file:") return "";
     if (voxaConfig?.lanUrl && ["localhost", "127.0.0.1"].includes(location.hostname)) return voxaConfig.lanUrl;
     return `${location.protocol}//${location.host}/chat-app.html`;
+}
+
+function networkInviteUrl() {
+    const base = baseInviteUrl();
+    if (base && currentServerId) return `${base}?server=${encodeURIComponent(currentServerId)}`;
+    if (currentInviteUrl) return currentInviteUrl;
+    if (!base) return "Inicia el servidor para crear invitacion";
+    return base;
 }
 
 function micHelpText() {
@@ -124,6 +161,8 @@ function micHelpText() {
 
 function updateInviteText() {
     inviteLinkText.textContent = networkInviteUrl();
+    serverCodeText.textContent = currentServerId ? `Codigo: ${currentServerId}` : "Creando codigo...";
+    serverNameTitle.textContent = currentServerName;
 }
 
 async function loadConfig() {
@@ -198,6 +237,38 @@ function renderProfile() {
     nameInput.value = username;
 }
 
+function renderTextChannels() {
+    textChannelList.innerHTML = `
+        <div class="block-label">Texto</div>
+        ${state.textChannels.map((channel) => `
+            <button class="channel ${channel.id === activeChannel ? "active" : ""}" type="button" data-channel="${escapeHtml(channel.id)}">
+                <i class="fa-solid fa-hashtag"></i> ${escapeHtml(channel.name)}
+            </button>
+        `).join("")}
+    `;
+}
+
+function activeVoiceName() {
+    return state.voiceChannels.find((channel) => channel.id === activeVoiceChannel)?.name || "Lobby de voz";
+}
+
+function renderVoiceChannels() {
+    voiceChannelTitle.textContent = activeVoiceName();
+    voiceChannelList.innerHTML = `
+        <div class="block-label">Voz</div>
+        ${state.voiceChannels.map((channel) => `
+            <button class="voice-channel ${channel.id === activeVoiceChannel ? "active" : ""}" type="button" data-voice-channel="${escapeHtml(channel.id)}">
+                <i class="fa-solid fa-volume-high"></i> ${escapeHtml(channel.name)}
+            </button>
+        `).join("")}
+        <div class="create-channel-row">
+            <input id="newVoiceChannelInput" type="text" maxlength="32" placeholder="Nombre del canal">
+            <button type="button" data-action="create-voice-channel" title="Crear canal"><i class="fa-solid fa-plus"></i></button>
+        </div>
+        <div class="voice-members">${state.voiceUsers.map((user) => `<span>${escapeHtml(user.name)}</span>`).join("")}</div>
+    `;
+}
+
 function renderMessages() {
     const messages = state.messages[activeChannel] || [];
     messagesEl.innerHTML = messages.map((message) => `
@@ -229,10 +300,9 @@ function userRows(users) {
 }
 
 function renderUsers() {
-    const users = state.users.length ? state.users : [{ name: username, status: "En la sala" }];
+    const users = state.users.length ? state.users : [{ name: username, status: "En el servidor" }];
     connectedCount.textContent = `${users.length} conectado${users.length === 1 ? "" : "s"}`;
-    document.querySelector(".voice-members").innerHTML = users.map((user) => `<span>${escapeHtml(user.name)}</span>`).join("");
-    voiceUsers.innerHTML = userRows(users);
+    voiceUsers.innerHTML = userRows(state.voiceUsers.length ? state.voiceUsers : []);
     sideFriendsList.innerHTML = userRows(users);
     friendsList.innerHTML = users.map((user) => `
         <article class="friend-card">
@@ -243,6 +313,7 @@ function renderUsers() {
             </div>
         </article>
     `).join("");
+    renderVoiceChannels();
 }
 
 function hideFrames() {
@@ -282,7 +353,7 @@ function syncEmbed(song, autoplay = false) {
 }
 
 function renderQueue() {
-    if (!state.songs.length) state.songs = fallbackSongs;
+    if (!state.songs.length) state.songs = fallbackSongs.map((song) => ({ ...song }));
     const song = state.songs[state.activeSong] || state.songs[0];
     queueList.innerHTML = state.songs.map((item, index) => `
         <button class="song ${index === state.activeSong ? "active" : ""}" type="button" data-song="${index}">
@@ -295,9 +366,9 @@ function renderQueue() {
     `).join("");
 
     songTitle.textContent = song.title;
-    songArtist.textContent = song.artist;
+    songArtist.textContent = `${song.artist} · ${activeVoiceName()}`;
     sideSongTitle.textContent = song.title;
-    sideSongArtist.textContent = song.artist;
+    sideSongArtist.textContent = activeVoiceName();
     totalTime.textContent = song.duration || "--:--";
     progress.value = state.progress || 0;
 
@@ -430,6 +501,12 @@ function userNumber(id) {
     return Number(String(id || "").replace(/\D/g, "")) || 0;
 }
 
+function resetVoicePeers() {
+    for (const peer of peers.values()) peer.close();
+    peers = new Map();
+    remoteAudio.innerHTML = "";
+}
+
 function setRemoteMuted() {
     remoteAudio.querySelectorAll("audio").forEach((audio) => {
         audio.muted = audioMuted;
@@ -494,7 +571,7 @@ async function handleSignal(data) {
 
 function connectVoiceToUsers() {
     if (!localStream || !currentUserId) return;
-    state.users
+    state.voiceUsers
         .filter((user) => user.id && user.id !== currentUserId)
         .forEach((user) => createPeer(user.id, userNumber(currentUserId) < userNumber(user.id)));
 }
@@ -508,6 +585,7 @@ async function startVoice() {
         showToast("En red local Chrome necesita el acceso especial de microfono. Copia la ayuda.");
         return;
     }
+    sendSocket("voice-join", { channel: activeVoiceChannel });
     localStream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
         video: false
@@ -517,15 +595,13 @@ async function startVoice() {
     });
     inCall = true;
     callBtn.textContent = "Salir de voz";
-    voiceStatus.textContent = "Conectado al Lobby";
+    voiceStatus.textContent = `Conectado a ${activeVoiceName()}`;
     sendSocket("status", { status: "En llamada" });
     connectVoiceToUsers();
 }
 
 function stopVoice() {
-    for (const peer of peers.values()) peer.close();
-    peers = new Map();
-    remoteAudio.innerHTML = "";
+    resetVoicePeers();
     if (localStream) {
         localStream.getTracks().forEach((track) => track.stop());
         localStream = null;
@@ -536,9 +612,83 @@ function stopVoice() {
     sendSocket("status", { status: "En texto" });
 }
 
+function joinPrivateServer({ create = false, serverId = "", serverName = "", mode = "auto" } = {}) {
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+        showToast("Todavia no esta conectado. Proba de nuevo en unos segundos.");
+        return;
+    }
+    lastJoinMode = mode;
+    sendSocket("join", {
+        name: username,
+        create,
+        serverId: String(serverId || "").trim().toUpperCase(),
+        serverName,
+        voiceChannel: activeVoiceChannel
+    });
+}
+
+function applyJoined(data) {
+    currentUserId = data.clientId || currentUserId;
+    currentServerId = data.serverId;
+    currentServerName = data.serverName || "Voxa Room";
+    currentInviteUrl = data.inviteUrl || "";
+    localStorage.setItem("voxaServerId", currentServerId);
+    if (location.protocol !== "file:") {
+        const nextUrl = new URL(location.href);
+        nextUrl.searchParams.set("server", currentServerId);
+        history.replaceState(null, "", nextUrl);
+    }
+
+    state.textChannels = data.state.textChannels || state.textChannels;
+    state.voiceChannels = data.state.voiceChannels || state.voiceChannels;
+    state.messages = data.state.messages || fallbackMessages;
+    state.users = data.state.users || [];
+    activeVoiceChannel = data.state.activeVoiceChannel || activeVoiceChannel;
+
+    connectionText.textContent = "Conectado al servidor privado";
+    updateInviteText();
+    renderTextChannels();
+    renderMessages();
+    renderUsers();
+}
+
+function applyMusicState(data, autoplay = false) {
+    if (data.channel && data.channel !== activeVoiceChannel) return;
+    state.songs = data.songs || state.songs;
+    state.activeSong = Number(data.activeSong) || 0;
+    state.playing = Boolean(data.playing);
+    state.progress = Math.max(0, Math.min(100, Number(data.progress) || 0));
+    state.voiceUsers = data.users || state.voiceUsers;
+    renderUsers();
+    syncMusicFromState(autoplay);
+    connectVoiceToUsers();
+}
+
+function changeVoiceChannel(channel) {
+    if (!channel || channel === activeVoiceChannel) {
+        switchView("voice");
+        return;
+    }
+    activeVoiceChannel = channel;
+    resetVoicePeers();
+    stopGeneratedMusic();
+    audioPlayer.pause();
+    state.songs = fallbackSongs.map((song) => ({ ...song }));
+    state.activeSong = 0;
+    state.playing = false;
+    state.progress = 0;
+    state.voiceUsers = [];
+    renderUsers();
+    syncMusicFromState(false);
+    sendSocket("voice-join", { channel });
+    if (inCall) voiceStatus.textContent = `Conectado a ${activeVoiceName()}`;
+    switchView("voice");
+}
+
 function connect() {
     if (!location.host || location.protocol === "file:") {
         connectionText.textContent = "Modo demo. Abri con el servidor para usarlo con amigos.";
+        renderTextChannels();
         renderMessages();
         renderQueue();
         renderUsers();
@@ -547,20 +697,16 @@ function connect() {
     }
     socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`);
     socket.addEventListener("open", () => {
-        connectionText.textContent = "Conectado con la sala local";
-        sendSocket("join", { name: username });
+        connectionText.textContent = "Conectando al servidor privado...";
+        joinPrivateServer({ serverId: getRequestedServerId(), mode: "auto" });
     });
     socket.addEventListener("message", (event) => {
         const data = JSON.parse(event.data);
         if (data.type === "hello") currentUserId = data.id;
-        if (data.type === "state") {
-            state = data.state;
-            renderMessages();
-            renderUsers();
-            syncMusicFromState(false);
-            connectVoiceToUsers();
-        }
+        if (data.type === "joined") applyJoined(data);
+        if (data.type === "music-state") applyMusicState(data, false);
         if (data.type === "message") {
+            if (!state.messages[data.channel]) state.messages[data.channel] = [];
             state.messages[data.channel].push(data.message);
             if (data.channel === activeChannel) renderMessages();
         }
@@ -569,7 +715,30 @@ function connect() {
             renderUsers();
             connectVoiceToUsers();
         }
-        if (data.type === "music") {
+        if (data.type === "channels") {
+            state.textChannels = data.textChannels || state.textChannels;
+            state.voiceChannels = data.voiceChannels || state.voiceChannels;
+            renderTextChannels();
+            renderUsers();
+        }
+        if (data.type === "channel-created") {
+            if (!state.voiceChannels.some((channel) => channel.id === data.channel.id)) {
+                state.voiceChannels.push(data.channel);
+                renderUsers();
+            }
+            showToast(`Canal creado: ${data.channel.name}`);
+        }
+        if (data.type === "voice-users" && data.channel === activeVoiceChannel) {
+            state.voiceUsers = data.users;
+            renderUsers();
+            connectVoiceToUsers();
+        }
+        if (data.type === "voice-joined") {
+            activeVoiceChannel = data.channel;
+            voiceStatus.textContent = inCall ? `Conectado a ${data.channelName}` : "Desconectado de voz";
+            renderUsers();
+        }
+        if (data.type === "music" && data.channel === activeVoiceChannel) {
             state.activeSong = data.activeSong;
             state.playing = data.playing;
             state.progress = data.progress;
@@ -578,13 +747,23 @@ function connect() {
         if (data.type === "signal") {
             handleSignal(data).catch(() => showToast("No pude conectar una voz"));
         }
-        if (data.type === "song-added") {
+        if (data.type === "song-added" && data.channel === activeVoiceChannel) {
             state.songs.push(data.song);
             state.activeSong = state.songs.length - 1;
             state.progress = 0;
             renderQueue();
             syncMusicFromState(false);
             showToast("Tema agregado por " + data.by);
+        }
+        if (data.type === "error") {
+            if (lastJoinMode === "auto" && String(data.message || "").includes("no existe")) {
+                localStorage.removeItem("voxaServerId");
+                currentServerId = "";
+                currentInviteUrl = "";
+                joinPrivateServer({ create: true, serverName: `${username} Room`, mode: "create" });
+                return;
+            }
+            showToast(data.message || "Ocurrio un error");
         }
     });
     socket.addEventListener("close", () => {
@@ -597,15 +776,34 @@ document.querySelectorAll(".rail-nav").forEach((button) => {
     button.addEventListener("click", () => switchView(button.dataset.view));
 });
 
-document.querySelectorAll(".channel").forEach((button) => {
-    button.addEventListener("click", () => {
-        activeChannel = button.dataset.channel;
-        document.querySelectorAll(".channel").forEach((item) => item.classList.remove("active"));
-        button.classList.add("active");
-        channelTitle.textContent = `# ${activeChannel}`;
-        switchView("chat");
-        renderMessages();
-    });
+textChannelList.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-channel]");
+    if (!button) return;
+    activeChannel = button.dataset.channel;
+    renderTextChannels();
+    channelTitle.textContent = `# ${activeChannel}`;
+    switchView("chat");
+    renderMessages();
+});
+
+voiceChannelList.addEventListener("click", (event) => {
+    const action = event.target.closest("[data-action]");
+    if (action?.dataset.action === "create-voice-channel") {
+        const input = document.getElementById("newVoiceChannelInput");
+        const name = input?.value.trim() || `Canal de ${username}`;
+        sendSocket("channel-create", { name });
+        if (input) input.value = "";
+        return;
+    }
+    const button = event.target.closest("[data-voice-channel]");
+    if (!button) return;
+    changeVoiceChannel(button.dataset.voiceChannel);
+});
+
+voiceChannelList.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.target.id !== "newVoiceChannelInput") return;
+    event.preventDefault();
+    voiceChannelList.querySelector('[data-action="create-voice-channel"]')?.click();
 });
 
 messageForm.addEventListener("submit", (event) => {
@@ -638,6 +836,27 @@ async function copyInvite() {
 
 document.getElementById("inviteBtn").addEventListener("click", copyInvite);
 document.getElementById("inviteBtnAlt").addEventListener("click", copyInvite);
+
+newServerBtn.addEventListener("click", () => {
+    stopVoice();
+    activeVoiceChannel = "lobby";
+    joinPrivateServer({ create: true, serverName: `${username} Room`, mode: "create" });
+});
+
+joinServerBtn.addEventListener("click", () => {
+    const code = joinServerInput.value.trim().toUpperCase();
+    if (!code) return;
+    stopVoice();
+    activeVoiceChannel = "lobby";
+    joinPrivateServer({ serverId: code, mode: "manual" });
+});
+
+joinServerInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+        event.preventDefault();
+        joinServerBtn.click();
+    }
+});
 
 document.getElementById("copyMicHelp").addEventListener("click", async () => {
     try {
@@ -738,11 +957,12 @@ document.getElementById("saveNameBtn").addEventListener("click", () => {
     username = nextName;
     localStorage.setItem("salaPcName", username);
     renderProfile();
-    sendSocket("join", { name: username });
+    joinPrivateServer({ serverId: currentServerId, mode: "profile" });
     showToast("Nombre guardado");
 });
 
 renderProfile();
+renderTextChannels();
 renderMessages();
 renderQueue();
 renderUsers();
