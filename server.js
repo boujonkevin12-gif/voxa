@@ -128,6 +128,8 @@ function makeEmptyVoiceChannel(channel) {
 }
 
 function createPrivateServer(name, owner) {
+    const home = homeCode();
+    if (servers.has(home)) return servers.get(home);
     const id = makeCode();
     const safeName = String(name || `${owner || "Voxa"} Room`).slice(0, 40);
     const defaultVoiceChannels = voiceChannelTemplates.map((channel) => ({ ...channel }));
