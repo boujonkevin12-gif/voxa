@@ -91,7 +91,8 @@ function makeEmptyVoiceChannel(channel) {
         songs: fallbackSongs.map((song) => ({ ...song })),
         activeSong: 0,
         playing: false,
-        progress: 0
+        progress: 0,
+        updatedAt: Date.now()
     };
 }
 
@@ -245,6 +246,10 @@ function serverClients(serverId) {
 }
 
 function voiceClients(serverId, voiceChannel) {
+    return serverClients(serverId).filter(([, client]) => client.voiceChannel === voiceChannel && client.inVoice);
+}
+
+function channelClients(serverId, voiceChannel) {
     return serverClients(serverId).filter(([, client]) => client.voiceChannel === voiceChannel);
 }
 
@@ -253,7 +258,10 @@ function publicUsers(serverId) {
         id: client.id,
         name: client.name,
         status: client.status,
-        voiceChannel: client.voiceChannel
+        voiceChannel: client.voiceChannel,
+        inVoice: Boolean(client.inVoice),
+        micMuted: Boolean(client.micMuted),
+        audioMuted: Boolean(client.audioMuted)
     }));
 }
 
@@ -262,7 +270,10 @@ function voiceUsers(serverId, voiceChannel) {
         id: client.id,
         name: client.name,
         status: client.status,
-        voiceChannel: client.voiceChannel
+        voiceChannel: client.voiceChannel,
+        inVoice: Boolean(client.inVoice),
+        micMuted: Boolean(client.micMuted),
+        audioMuted: Boolean(client.audioMuted)
     }));
 }
 
@@ -272,6 +283,19 @@ function broadcastServer(serverId, data) {
 
 function broadcastVoice(serverId, voiceChannel, data) {
     for (const [socket] of voiceClients(serverId, voiceChannel)) send(socket, data);
+}
+
+function broadcastChannel(serverId, voiceChannel, data) {
+    for (const [socket] of channelClients(serverId, voiceChannel)) send(socket, data);
+}
+
+function broadcastVoiceEvent(serverId, voiceChannel, event) {
+    if (!voiceChannel) return;
+    broadcastVoice(serverId, voiceChannel, {
+        type: "voice-event",
+        channel: voiceChannel,
+        ...event
+    });
 }
 
 function syncUsers(serverId) {
@@ -299,7 +323,26 @@ function syncMusic(socket, server, voiceChannel) {
         activeSong: music.activeSong,
         playing: music.playing,
         progress: music.progress,
-        users: music.users
+        users: music.users,
+        updatedAt: music.updatedAt,
+        serverTime: Date.now()
+    });
+}
+
+function broadcastMusicState(server, voiceChannel, extra = {}) {
+    const music = server.voiceChannels[voiceChannel];
+    if (!music) return;
+    broadcastChannel(server.id, voiceChannel, {
+        type: "music-state",
+        channel: voiceChannel,
+        songs: music.songs,
+        activeSong: music.activeSong,
+        playing: music.playing,
+        progress: music.progress,
+        users: music.users,
+        updatedAt: music.updatedAt,
+        serverTime: Date.now(),
+        ...extra
     });
 }
 
@@ -328,6 +371,11 @@ function joinServer(socket, data, request) {
 
     client.serverId = server.id;
     client.voiceChannel = server.voiceChannels[data.voiceChannel] ? data.voiceChannel : "lobby";
+    if (previousServerId !== server.id) {
+        client.inVoice = false;
+        client.micMuted = false;
+        client.audioMuted = false;
+    }
 
     send(socket, {
         type: "joined",
@@ -351,26 +399,66 @@ function joinServer(socket, data, request) {
     syncVoiceUsers(server.id, client.voiceChannel);
 }
 
-function moveVoiceChannel(socket, channelId) {
+function moveVoiceChannel(socket, channelId, active = true) {
     const client = sockets.get(socket);
     if (!client?.serverId) return;
     const server = servers.get(client.serverId);
     if (!server?.voiceChannels[channelId]) return;
 
     const previousChannel = client.voiceChannel;
+    const wasInVoice = Boolean(client.inVoice);
+    const nextInVoice = Boolean(active);
     if (previousChannel === channelId) {
+        client.inVoice = nextInVoice;
+        client.status = nextInVoice ? "En llamada" : "En texto";
         syncMusic(socket, server, channelId);
+        syncUsers(server.id);
+        syncVoiceUsers(server.id, channelId);
+        if (!wasInVoice && nextInVoice) {
+            broadcastVoiceEvent(server.id, channelId, {
+                action: "join",
+                userId: client.id,
+                user: client.name,
+                channelName: server.voiceChannels[channelId].name
+            });
+        }
+        if (wasInVoice && !nextInVoice) {
+            broadcastVoiceEvent(server.id, channelId, {
+                action: "leave",
+                userId: client.id,
+                user: client.name,
+                channelName: server.voiceChannels[channelId].name
+            });
+        }
         return;
     }
 
+    if (wasInVoice) {
+        client.inVoice = false;
+        broadcastVoiceEvent(server.id, previousChannel, {
+            action: "leave",
+            userId: client.id,
+            user: client.name,
+            channelName: server.voiceChannels[previousChannel]?.name || previousChannel
+        });
+    }
     client.voiceChannel = channelId;
-    client.status = "En llamada";
+    client.inVoice = nextInVoice;
+    client.status = nextInVoice ? "En llamada" : "En texto";
 
     send(socket, { type: "voice-joined", channel: channelId, channelName: server.voiceChannels[channelId].name });
     syncUsers(server.id);
     syncVoiceUsers(server.id, previousChannel);
     syncVoiceUsers(server.id, channelId);
     syncMusic(socket, server, channelId);
+    if (nextInVoice) {
+        broadcastVoiceEvent(server.id, channelId, {
+            action: "join",
+            userId: client.id,
+            user: client.name,
+            channelName: server.voiceChannels[channelId].name
+        });
+    }
 }
 
 function handleMessage(socket, data, request) {
@@ -411,7 +499,44 @@ function handleMessage(socket, data, request) {
     }
 
     if (data.type === "voice-join") {
-        moveVoiceChannel(socket, String(data.channel || "lobby"));
+        moveVoiceChannel(socket, String(data.channel || "lobby"), data.active !== false);
+        return;
+    }
+
+    if (data.type === "voice-leave") {
+        client.inVoice = false;
+        client.status = "En texto";
+        syncUsers(server.id);
+        syncVoiceUsers(server.id, client.voiceChannel);
+        broadcastVoiceEvent(server.id, client.voiceChannel, {
+            action: "leave",
+            userId: client.id,
+            user: client.name,
+            channelName: server.voiceChannels[client.voiceChannel]?.name || client.voiceChannel
+        });
+        return;
+    }
+
+    if (data.type === "voice-state") {
+        const nextMicMuted = Boolean(data.micMuted);
+        const nextAudioMuted = Boolean(data.audioMuted);
+        const events = [];
+        if (client.micMuted !== nextMicMuted) events.push(nextMicMuted ? "mute" : "unmute");
+        if (client.audioMuted !== nextAudioMuted) events.push(nextAudioMuted ? "deafen" : "undeafen");
+        client.micMuted = nextMicMuted;
+        client.audioMuted = nextAudioMuted;
+        syncUsers(server.id);
+        syncVoiceUsers(server.id, client.voiceChannel);
+        if (client.inVoice) {
+            for (const action of events) {
+                broadcastVoiceEvent(server.id, client.voiceChannel, {
+                    action,
+                    userId: client.id,
+                    user: client.name,
+                    channelName: server.voiceChannels[client.voiceChannel]?.name || client.voiceChannel
+                });
+            }
+        }
         return;
     }
 
@@ -431,7 +556,7 @@ function handleMessage(socket, data, request) {
             channel,
             by: client.name
         });
-        moveVoiceChannel(socket, channel.id);
+        moveVoiceChannel(socket, channel.id, Boolean(client.inVoice));
         return;
     }
 
@@ -441,13 +566,8 @@ function handleMessage(socket, data, request) {
         music.activeSong = Math.max(0, Math.min(music.songs.length - 1, Number(data.activeSong) || 0));
         music.playing = Boolean(data.playing);
         music.progress = Math.max(0, Math.min(100, Number(data.progress) || 0));
-        broadcastVoice(server.id, client.voiceChannel, {
-            type: "music",
-            channel: client.voiceChannel,
-            activeSong: music.activeSong,
-            playing: music.playing,
-            progress: music.progress
-        });
+        music.updatedAt = Date.now();
+        broadcastMusicState(server, client.voiceChannel, { autoplay: music.playing });
         return;
     }
 
@@ -466,21 +586,25 @@ function handleMessage(socket, data, request) {
         music.songs.push(song);
         music.songs = music.songs.slice(-MAX_SONGS_PER_CHANNEL);
         music.activeSong = music.songs.length - 1;
+        music.playing = true;
         music.progress = 0;
-        broadcastVoice(server.id, client.voiceChannel, { type: "song-added", channel: client.voiceChannel, song, by: client.name });
-        broadcastVoice(server.id, client.voiceChannel, {
-            type: "music",
+        music.updatedAt = Date.now();
+        broadcastChannel(server.id, client.voiceChannel, {
+            type: "song-added",
             channel: client.voiceChannel,
-            activeSong: music.activeSong,
-            playing: music.playing,
-            progress: 0
+            by: client.name,
+            title: song.title
         });
+        broadcastMusicState(server, client.voiceChannel, { autoplay: true });
         return;
     }
 
     if (data.type === "signal") {
         for (const [targetSocket, targetClient] of sockets.entries()) {
-            const samePrivateRoom = targetClient.serverId === client.serverId && targetClient.voiceChannel === client.voiceChannel;
+            const samePrivateRoom = targetClient.serverId === client.serverId &&
+                targetClient.voiceChannel === client.voiceChannel &&
+                targetClient.inVoice &&
+                client.inVoice;
             if (targetClient.id === data.to && samePrivateRoom) {
                 send(targetSocket, { type: "signal", from: client.id, signal: data.signal });
                 break;
@@ -493,6 +617,13 @@ function cleanupSocket(socket) {
     const client = sockets.get(socket);
     sockets.delete(socket);
     if (!client) return;
+    if (client.inVoice) {
+        broadcastVoiceEvent(client.serverId, client.voiceChannel, {
+            action: "leave",
+            userId: client.id,
+            user: client.name
+        });
+    }
     syncUsers(client.serverId);
     syncVoiceUsers(client.serverId, client.voiceChannel);
 }
@@ -537,7 +668,10 @@ webServer.on("upgrade", (request, socket) => {
         name: "Invitado",
         status: "Conectando",
         serverId: "",
-        voiceChannel: "lobby"
+        voiceChannel: "lobby",
+        inVoice: false,
+        micMuted: false,
+        audioMuted: false
     });
     send(socket, { type: "hello", id });
 

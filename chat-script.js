@@ -30,6 +30,7 @@ const playPause = document.getElementById("playPause");
 const callBtn = document.getElementById("callBtn");
 const voiceStatus = document.getElementById("voiceStatus");
 const voiceChannelTitle = document.getElementById("voiceChannelTitle");
+const voiceRoomStats = document.getElementById("voiceRoomStats");
 const connectionText = document.getElementById("connectionText");
 const connectedCount = document.getElementById("connectedCount");
 const friendsList = document.getElementById("friendsList");
@@ -252,20 +253,51 @@ function activeVoiceName() {
     return state.voiceChannels.find((channel) => channel.id === activeVoiceChannel)?.name || "Lobby de voz";
 }
 
+function voiceMembersFor(channelId) {
+    return state.users.filter((user) => user.voiceChannel === channelId && user.inVoice);
+}
+
+function voiceIconFor(user) {
+    if (user.audioMuted) return "fa-volume-xmark";
+    if (user.micMuted) return "fa-microphone-slash";
+    return "fa-microphone-lines";
+}
+
+function voiceStateLabel(user) {
+    if (user.audioMuted) return "Sin audio";
+    if (user.micMuted) return "Muteado";
+    return user.status || "En voz";
+}
+
 function renderVoiceChannels() {
     voiceChannelTitle.textContent = activeVoiceName();
+    const activeCount = voiceMembersFor(activeVoiceChannel).length;
+    voiceRoomStats.innerHTML = `
+        <span><i class="fa-solid fa-user-group"></i> ${activeCount} en voz</span>
+        <span><i class="fa-solid fa-lock"></i> Musica privada</span>
+        <span><i class="fa-solid fa-wave-square"></i> Sonidos de sala</span>
+    `;
     voiceChannelList.innerHTML = `
         <div class="block-label">Voz</div>
-        ${state.voiceChannels.map((channel) => `
-            <button class="voice-channel ${channel.id === activeVoiceChannel ? "active" : ""}" type="button" data-voice-channel="${escapeHtml(channel.id)}">
-                <i class="fa-solid fa-volume-high"></i> ${escapeHtml(channel.name)}
-            </button>
-        `).join("")}
+        ${state.voiceChannels.map((channel) => {
+            const members = voiceMembersFor(channel.id);
+            return `
+                <button class="voice-channel ${channel.id === activeVoiceChannel ? "active" : ""}" type="button" data-voice-channel="${escapeHtml(channel.id)}">
+                    <span class="voice-channel-main">
+                        <i class="fa-solid fa-volume-high"></i>
+                        <span>${escapeHtml(channel.name)}</span>
+                    </span>
+                    <span class="voice-count">${members.length}</span>
+                </button>
+                <div class="voice-members channel-members">
+                    ${members.slice(0, 5).map((user) => `<span><i class="fa-solid ${voiceIconFor(user)}"></i>${escapeHtml(user.name)}</span>`).join("")}
+                </div>
+            `;
+        }).join("")}
         <div class="create-channel-row">
             <input id="newVoiceChannelInput" type="text" maxlength="32" placeholder="Nombre del canal">
             <button type="button" data-action="create-voice-channel" title="Crear canal"><i class="fa-solid fa-plus"></i></button>
         </div>
-        <div class="voice-members">${state.voiceUsers.map((user) => `<span>${escapeHtml(user.name)}</span>`).join("")}</div>
     `;
 }
 
@@ -299,10 +331,28 @@ function userRows(users) {
     `).join("");
 }
 
+function voiceUserRows(users) {
+    if (!users.length) {
+        return `<div class="empty-voice">Todavia no hay nadie en este canal.</div>`;
+    }
+    return users.map((user) => `
+        <div class="voice-user-card">
+            <div class="avatar">${escapeHtml(initial(user.name))}</div>
+            <div>
+                <strong>${escapeHtml(user.name)}</strong>
+                <small>${escapeHtml(voiceStateLabel(user))}</small>
+            </div>
+            <span class="voice-badge" title="${escapeHtml(voiceStateLabel(user))}">
+                <i class="fa-solid ${voiceIconFor(user)}"></i>
+            </span>
+        </div>
+    `).join("");
+}
+
 function renderUsers() {
     const users = state.users.length ? state.users : [{ name: username, status: "En el servidor" }];
     connectedCount.textContent = `${users.length} conectado${users.length === 1 ? "" : "s"}`;
-    voiceUsers.innerHTML = userRows(state.voiceUsers.length ? state.voiceUsers : []);
+    voiceUsers.innerHTML = voiceUserRows(state.voiceUsers.length ? state.voiceUsers : []);
     sideFriendsList.innerHTML = userRows(users);
     friendsList.innerHTML = users.map((user) => `
         <article class="friend-card">
@@ -366,7 +416,7 @@ function renderQueue() {
     `).join("");
 
     songTitle.textContent = song.title;
-    songArtist.textContent = `${song.artist} · ${activeVoiceName()}`;
+    songArtist.textContent = `${song.artist} - ${activeVoiceName()}`;
     sideSongTitle.textContent = song.title;
     sideSongArtist.textContent = activeVoiceName();
     totalTime.textContent = song.duration || "--:--";
@@ -405,6 +455,40 @@ function playTone(frequency, duration, type, gainValue) {
     gain.connect(masterGain);
     oscillator.start(now);
     oscillator.stop(now + duration + 0.03);
+}
+
+function playVoiceEventSound(action) {
+    try {
+        ensureAudioContext();
+        const patterns = {
+            join: [[660, 0], [880, 90]],
+            leave: [[520, 0], [330, 95]],
+            mute: [[260, 0]],
+            unmute: [[440, 0], [660, 70]],
+            deafen: [[220, 0], [180, 90]],
+            undeafen: [[360, 0], [520, 75]]
+        };
+        for (const [frequency, delay] of patterns[action] || patterns.join) {
+            window.setTimeout(() => playTone(frequency, 0.09, "sine", 0.2), delay);
+        }
+    } catch {
+        // Browsers can block audio until the first click; the next user action will enable it.
+    }
+}
+
+function announceVoiceEvent(data) {
+    const actionText = {
+        join: "entro al canal",
+        leave: "salio del canal",
+        mute: "se muteo",
+        unmute: "se desmuteo",
+        deafen: "silencio el audio",
+        undeafen: "activo el audio"
+    };
+    if (data.userId !== currentUserId) {
+        playVoiceEventSound(data.action);
+        showToast(`${data.user || "Alguien"} ${actionText[data.action] || "actualizo voz"}`);
+    }
 }
 
 function startGeneratedMusic() {
@@ -454,6 +538,11 @@ function syncMusicFromState(autoplayEmbed = false) {
 
     if (song.source === "audio" && song.url) {
         stopGeneratedMusic();
+        const duration = Number.isFinite(audioPlayer.duration) ? audioPlayer.duration : 0;
+        if (duration) {
+            const nextTime = (Number(progress.value) / 100) * duration;
+            if (Math.abs(audioPlayer.currentTime - nextTime) > 2) audioPlayer.currentTime = nextTime;
+        }
         if (state.playing) {
             audioPlayer.play().catch(() => showToast("El navegador bloqueo el audio. Toca Play otra vez."));
         } else {
@@ -490,6 +579,7 @@ function addSongFromUrl(url) {
         state.songs.push(song);
         state.activeSong = state.songs.length - 1;
         state.progress = 0;
+        state.playing = true;
         renderQueue();
         syncMusicFromState(false);
     }
@@ -585,7 +675,6 @@ async function startVoice() {
         showToast("En red local Chrome necesita el acceso especial de microfono. Copia la ayuda.");
         return;
     }
-    sendSocket("voice-join", { channel: activeVoiceChannel });
     localStream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
         video: false
@@ -596,6 +685,9 @@ async function startVoice() {
     inCall = true;
     callBtn.textContent = "Salir de voz";
     voiceStatus.textContent = `Conectado a ${activeVoiceName()}`;
+    playVoiceEventSound("join");
+    sendSocket("voice-join", { channel: activeVoiceChannel, active: true });
+    sendSocket("voice-state", { micMuted, audioMuted });
     sendSocket("status", { status: "En llamada" });
     connectVoiceToUsers();
 }
@@ -609,6 +701,8 @@ function stopVoice() {
     inCall = false;
     callBtn.textContent = "Entrar a voz";
     voiceStatus.textContent = "Desconectado de voz";
+    playVoiceEventSound("leave");
+    sendSocket("voice-leave");
     sendSocket("status", { status: "En texto" });
 }
 
@@ -680,7 +774,7 @@ function changeVoiceChannel(channel) {
     state.voiceUsers = [];
     renderUsers();
     syncMusicFromState(false);
-    sendSocket("voice-join", { channel });
+    sendSocket("voice-join", { channel, active: inCall });
     if (inCall) voiceStatus.textContent = `Conectado a ${activeVoiceName()}`;
     switchView("voice");
 }
@@ -704,7 +798,7 @@ function connect() {
         const data = JSON.parse(event.data);
         if (data.type === "hello") currentUserId = data.id;
         if (data.type === "joined") applyJoined(data);
-        if (data.type === "music-state") applyMusicState(data, false);
+        if (data.type === "music-state") applyMusicState(data, Boolean(data.autoplay));
         if (data.type === "message") {
             if (!state.messages[data.channel]) state.messages[data.channel] = [];
             state.messages[data.channel].push(data.message);
@@ -733,6 +827,9 @@ function connect() {
             renderUsers();
             connectVoiceToUsers();
         }
+        if (data.type === "voice-event" && data.channel === activeVoiceChannel) {
+            announceVoiceEvent(data);
+        }
         if (data.type === "voice-joined") {
             activeVoiceChannel = data.channel;
             voiceStatus.textContent = inCall ? `Conectado a ${data.channelName}` : "Desconectado de voz";
@@ -748,12 +845,8 @@ function connect() {
             handleSignal(data).catch(() => showToast("No pude conectar una voz"));
         }
         if (data.type === "song-added" && data.channel === activeVoiceChannel) {
-            state.songs.push(data.song);
-            state.activeSong = state.songs.length - 1;
-            state.progress = 0;
-            renderQueue();
-            syncMusicFromState(false);
-            showToast("Tema agregado por " + data.by);
+            if (data.by !== username) playVoiceEventSound("join");
+            showToast(`${data.title || "Tema"} agregado por ${data.by}`);
         }
         if (data.type === "error") {
             if (lastJoinMode === "auto" && String(data.message || "").includes("no existe")) {
@@ -879,6 +972,8 @@ document.getElementById("muteBtn").addEventListener("click", (event) => {
     event.currentTarget.classList.toggle("active");
     micMuted = event.currentTarget.classList.contains("active");
     if (localStream) localStream.getAudioTracks().forEach((track) => { track.enabled = !micMuted; });
+    playVoiceEventSound(micMuted ? "mute" : "unmute");
+    sendSocket("voice-state", { micMuted, audioMuted });
     showToast(micMuted ? "Microfono silenciado" : "Microfono activo");
 });
 
@@ -886,6 +981,8 @@ document.getElementById("deafenBtn").addEventListener("click", (event) => {
     event.currentTarget.classList.toggle("active");
     audioMuted = event.currentTarget.classList.contains("active");
     setRemoteMuted();
+    playVoiceEventSound(audioMuted ? "deafen" : "undeafen");
+    sendSocket("voice-state", { micMuted, audioMuted });
     showToast(audioMuted ? "Audio de voz silenciado" : "Audio de voz activo");
 });
 

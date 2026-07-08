@@ -9,6 +9,8 @@
     --muted: #ad9a8e;
     --soft: #e7d4c8;
     --orange: #ff7a1a;
+    --blue: #4aa3ff;
+    --cyan: #2dd4bf;
     --red: #e53935;
     --yellow: #ffc857;
     --green: #31d07c;
@@ -225,6 +227,7 @@ small,
 .voice-channel {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 10px;
     width: 100%;
     min-height: 42px;
@@ -233,6 +236,31 @@ small,
     color: var(--soft);
     background: transparent;
     text-align: left;
+}
+
+.voice-channel-main {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.voice-channel-main span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.voice-count {
+    display: grid;
+    place-items: center;
+    min-width: 26px;
+    height: 24px;
+    border-radius: 999px;
+    color: var(--cyan);
+    background: rgba(45, 212, 191, .12);
+    font-size: 12px;
+    font-weight: 900;
 }
 
 .channel:hover,
@@ -249,7 +277,15 @@ small,
     min-height: 30px;
 }
 
+.channel-members {
+    min-height: 0;
+    margin: -3px 0 3px 30px;
+}
+
 .voice-members span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
     padding: 6px 9px;
     border-radius: 999px;
     color: var(--soft);
@@ -342,6 +378,11 @@ small,
 .control-action {
     color: var(--text);
     background: rgba(255, 255, 255, .08);
+}
+
+.control-action.active {
+    color: #071311;
+    background: linear-gradient(135deg, var(--cyan), var(--blue));
 }
 
 .primary-action:hover,
@@ -506,8 +547,11 @@ small,
 
 .voice-stage {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 300px;
+    grid-template-columns: minmax(0, 1fr) 320px;
     gap: 18px;
+    background:
+        linear-gradient(135deg, rgba(74, 163, 255, .08), transparent 45%),
+        linear-gradient(315deg, rgba(45, 212, 191, .07), transparent 42%);
 }
 
 .voice-hero,
@@ -521,6 +565,10 @@ small,
     align-content: center;
     gap: 16px;
     text-align: center;
+    min-height: 520px;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, .06), rgba(255, 255, 255, .025)),
+        rgba(29, 23, 20, .86);
 }
 
 .pulse-ring {
@@ -531,8 +579,29 @@ small,
     border-radius: 50%;
     color: #160b07;
     font-size: 42px;
-    background: linear-gradient(135deg, var(--orange), var(--red));
-    box-shadow: 0 0 0 16px rgba(255, 122, 26, .08), 0 28px 70px rgba(229, 57, 53, .25);
+    background: linear-gradient(135deg, var(--cyan), var(--blue));
+    box-shadow: 0 0 0 16px rgba(45, 212, 191, .09), 0 28px 70px rgba(74, 163, 255, .22);
+}
+
+.voice-room-stats {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+}
+
+.voice-room-stats span {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 34px;
+    padding: 0 11px;
+    border: 1px solid rgba(255, 255, 255, .08);
+    border-radius: 999px;
+    color: var(--soft);
+    background: rgba(255, 255, 255, .06);
+    font-size: 12px;
+    font-weight: 900;
 }
 
 .voice-actions {
@@ -546,6 +615,50 @@ small,
     display: grid;
     gap: 8px;
     margin-top: 12px;
+}
+
+.voice-user-card {
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr) 34px;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid rgba(255, 255, 255, .07);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, .06);
+}
+
+.voice-user-card div {
+    display: grid;
+    min-width: 0;
+}
+
+.voice-user-card strong,
+.voice-user-card small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.voice-badge {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    color: var(--cyan);
+    background: rgba(45, 212, 191, .12);
+}
+
+.empty-voice {
+    padding: 14px;
+    border: 1px dashed rgba(255, 255, 255, .12);
+    border-radius: 8px;
+    color: var(--muted);
+    background: rgba(255, 255, 255, .04);
+    font-size: 13px;
+    line-height: 1.45;
 }
 
 .user-row,
