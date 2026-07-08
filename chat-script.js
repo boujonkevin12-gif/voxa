@@ -28,14 +28,13 @@ const sideSongArtist = document.getElementById("sideSongArtist");
 const queueList = document.getElementById("queueList");
 const playPause = document.getElementById("playPause");
 const callBtn = document.getElementById("callBtn");
+const callBtnMini = document.getElementById("callBtnMini");
 const voiceStatus = document.getElementById("voiceStatus");
 const voiceChannelTitle = document.getElementById("voiceChannelTitle");
-const voiceRoomStats = document.getElementById("voiceRoomStats");
 const connectionText = document.getElementById("connectionText");
 const connectedCount = document.getElementById("connectedCount");
 const friendsList = document.getElementById("friendsList");
 const sideFriendsList = document.getElementById("sideFriendsList");
-const voiceUsers = document.getElementById("voiceUsers");
 const progress = document.getElementById("musicProgress");
 const currentTime = document.getElementById("currentTime");
 const totalTime = document.getElementById("totalTime");
@@ -58,6 +57,19 @@ const joinServerInput = document.getElementById("joinServerInput");
 const joinServerBtn = document.getElementById("joinServerBtn");
 const textChannelList = document.getElementById("textChannelList");
 const voiceChannelList = document.getElementById("voiceChannelList");
+const vmpSongTitle = document.getElementById("vmpSongTitle");
+const vmpSongArtist = document.getElementById("vmpSongArtist");
+const vmpPlayPause = document.getElementById("vmpPlayPause");
+const vmpPrev = document.getElementById("vmpPrev");
+const vmpNext = document.getElementById("vmpNext");
+const vmpProgress = document.getElementById("vmpProgress");
+const vmpCurrentTime = document.getElementById("vmpCurrentTime");
+const vmpTotalTime = document.getElementById("vmpTotalTime");
+const vmpSongUrl = document.getElementById("vmpSongUrl");
+const vmpLoadBtn = document.getElementById("vmpLoadBtn");
+const vmpQueueList = document.getElementById("vmpQueueList");
+const voiceUsersList = document.getElementById("voiceUsersList");
+const voiceUserCount = document.getElementById("voiceUserCount");
 
 const generatedTracks = [
     { bpm: 104, bass: [110, 110, 146.83, 130.81], lead: [440, 493.88, 587.33, 523.25] },
@@ -89,12 +101,15 @@ let activeChannel = "general";
 let activeVoiceChannel = "lobby";
 let inCall = false;
 let socket = null;
-let username = localStorage.getItem("salaPcName") || "Agustin";
+let username = localStorage.getItem("salaPcName") || "User";
 let currentUserId = "";
 let currentServerId = "";
 let currentServerName = "Voxa Room";
 let currentInviteUrl = "";
 let lastMusicSync = 0;
+let pendingAudioPlay = false;
+let audioRetryTimer = null;
+let lastAudioPlayError = 0;
 let audioContext = null;
 let masterGain = null;
 let synthTimer = null;
@@ -105,6 +120,11 @@ let micMuted = false;
 let audioMuted = false;
 let voxaConfig = null;
 let lastJoinMode = "auto";
+let userVolumes = {};
+let voiceAnalyserNodes = new Map();
+let voiceActivityTimer = null;
+let speakingUsers = new Set();
+let voiceActivityThreshold = 0.02;
 
 localStorage.setItem("salaPcName", username);
 
@@ -164,6 +184,116 @@ function updateInviteText() {
     inviteLinkText.textContent = networkInviteUrl();
     serverCodeText.textContent = currentServerId ? `Codigo: ${currentServerId}` : "Creando codigo...";
     serverNameTitle.textContent = currentServerName;
+}
+
+function renderVoiceMusicPlayer() {
+    const song = state.songs[state.activeSong] || state.songs[0];
+    vmpSongTitle.textContent = song.title;
+    vmpSongArtist.textContent = `${song.artist} - ${activeVoiceName()}`;
+    vmpTotalTime.textContent = song.duration || "--:--";
+    vmpProgress.value = state.progress || 0;
+    vmpPlayPause.innerHTML = state.playing ? '<i class="fa-solid fa-pause"></i>' : '<i class="fa-solid fa-play"></i>';
+
+    vmpQueueList.innerHTML = state.songs.map((item, index) => `
+        <div class="vmp-queue-item ${index === state.activeSong ? "active" : ""}" data-vmp-song="${index}">
+            <div>
+                <strong>${escapeHtml(item.title)}</strong>
+                <small>${escapeHtml(item.artist)}</small>
+            </div>
+            <small>${escapeHtml(item.duration || "--:--")}</small>
+        </div>
+    `).join("");
+
+    const duration = Number.isFinite(audioPlayer.duration) ? audioPlayer.duration : 198;
+    const seconds = Math.round((Number(vmpProgress.value) / 100) * duration);
+    vmpCurrentTime.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function startVoiceActivityDetection() {
+    stopVoiceActivityDetection();
+    for (const [peerId, audioEl] of Object.entries(remoteAudio.querySelectorAll("audio"))) {
+        const peerIdFromEl = audioEl.id.replace("voice-", "");
+        if (!peerIdFromEl || voiceAnalyserNodes.has(peerIdFromEl)) continue;
+        if (!audioEl.srcObject) continue;
+        try {
+            const ctx = new AudioContext();
+            const source = ctx.createMediaStreamSource(audioEl.srcObject);
+            const analyser = ctx.createAnalyser();
+            analyser.fftSize = 256;
+            source.connect(analyser);
+            voiceAnalyserNodes.set(peerIdFromEl, { analyser, ctx, source });
+        } catch {}
+    }
+    if (!voiceActivityTimer) {
+        voiceActivityTimer = window.setInterval(checkVoiceActivity, 200);
+    }
+}
+
+function stopVoiceActivityDetection() {
+    if (voiceActivityTimer) {
+        window.clearInterval(voiceActivityTimer);
+        voiceActivityTimer = null;
+    }
+}
+
+function checkVoiceActivity() {
+    for (const [peerId, { analyser }] of voiceAnalyserNodes) {
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        analyser.getByteTimeDomainData(data);
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) {
+            const value = (data[i] - 128) / 128;
+            sum += value * value;
+        }
+        const rms = Math.sqrt(sum / data.length);
+        const wasSpeaking = speakingUsers.has(peerId);
+        if (rms > voiceActivityThreshold) {
+            speakingUsers.add(peerId);
+        } else {
+            speakingUsers.delete(peerId);
+        }
+        if (wasSpeaking !== speakingUsers.has(peerId)) {
+            renderVoiceUsers();
+        }
+    }
+}
+
+function renderVoiceUsers() {
+    const users = state.voiceUsers || [];
+    voiceUserCount.textContent = users.length;
+
+    voiceUsersList.innerHTML = users.map((user) => {
+        const isSpeaking = speakingUsers.has(user.id);
+        const vol = userVolumes[user.id] !== undefined ? userVolumes[user.id] : 1;
+        return `
+            <div class="voice-user-card ${isSpeaking ? "speaking" : ""}" data-peer="${escapeHtml(user.id)}">
+                <div class="avatar-wrapper">
+                    <div class="avatar voice-user-avatar">${escapeHtml(initial(user.name))}</div>
+                    <span class="status-dot ${isSpeaking ? "" : ""}"></span>
+                </div>
+                <div>
+                    <strong>${escapeHtml(user.name)}</strong>
+                    <small>${escapeHtml(voiceStateLabel(user))}</small>
+                </div>
+                <span class="voice-badge ${user.micMuted ? "muted" : user.audioMuted ? "deafened" : ""}" title="${escapeHtml(voiceStateLabel(user))}">
+                    <i class="fa-solid ${voiceIconFor(user)}"></i>
+                </span>
+            </div>
+        `;
+    }).join("");
+
+    const oldRemoteAudio = document.getElementById("voiceUsersList");
+    if (oldRemoteAudio) {
+        oldRemoteAudio.querySelectorAll(".voice-vol-slider").forEach((slider) => {
+            slider.addEventListener("input", (e) => {
+                const peerId = e.target.dataset.peer;
+                const vol = parseFloat(e.target.value);
+                userVolumes[peerId] = vol;
+                const audio = document.getElementById(`voice-${peerId}`);
+                if (audio) audio.volume = vol;
+            });
+        });
+    }
 }
 
 async function loadConfig() {
@@ -240,7 +370,7 @@ function renderProfile() {
 
 function renderTextChannels() {
     textChannelList.innerHTML = `
-        <div class="block-label">Texto</div>
+        <div class="block-label"><i class="fa-solid fa-chevron-down"></i> Texto</div>
         ${state.textChannels.map((channel) => `
             <button class="channel ${channel.id === activeChannel ? "active" : ""}" type="button" data-channel="${escapeHtml(channel.id)}">
                 <i class="fa-solid fa-hashtag"></i> ${escapeHtml(channel.name)}
@@ -271,14 +401,8 @@ function voiceStateLabel(user) {
 
 function renderVoiceChannels() {
     voiceChannelTitle.textContent = activeVoiceName();
-    const activeCount = voiceMembersFor(activeVoiceChannel).length;
-    voiceRoomStats.innerHTML = `
-        <span><i class="fa-solid fa-user-group"></i> ${activeCount} en voz</span>
-        <span><i class="fa-solid fa-lock"></i> Musica privada</span>
-        <span><i class="fa-solid fa-wave-square"></i> Sonidos de sala</span>
-    `;
     voiceChannelList.innerHTML = `
-        <div class="block-label">Voz</div>
+        <div class="block-label"><i class="fa-solid fa-chevron-down"></i> Voz</div>
         ${state.voiceChannels.map((channel) => {
             const members = voiceMembersFor(channel.id);
             return `
@@ -290,12 +414,21 @@ function renderVoiceChannels() {
                     <span class="voice-count">${members.length}</span>
                 </button>
                 <div class="voice-members channel-members">
-                    ${members.slice(0, 5).map((user) => `<span><i class="fa-solid ${voiceIconFor(user)}"></i>${escapeHtml(user.name)}</span>`).join("")}
+                    ${members.slice(0, 5).map((user) => `
+                        <div class="voice-member-item">
+                            <div class="avatar-wrapper">
+                                <div class="member-avatar">${escapeHtml(initial(user.name))}</div>
+                                <span class="status-dot"></span>
+                            </div>
+                            <span class="member-name">${escapeHtml(user.name)}</span>
+                        </div>
+                    `).join("")}
+                    ${members.length > 5 ? `<div class="voice-member-item"><span class="member-name" style="font-size:11px;color:var(--muted)">+${members.length - 5} mas</span></div>` : ""}
                 </div>
             `;
         }).join("")}
         <div class="create-channel-row">
-            <input id="newVoiceChannelInput" type="text" maxlength="32" placeholder="Nombre del canal">
+            <input id="newVoiceChannelInput" type="text" maxlength="32" placeholder="Nuevo canal">
             <button type="button" data-action="create-voice-channel" title="Crear canal"><i class="fa-solid fa-plus"></i></button>
         </div>
     `;
@@ -305,7 +438,9 @@ function renderMessages() {
     const messages = state.messages[activeChannel] || [];
     messagesEl.innerHTML = messages.map((message) => `
         <article class="message">
-            <div class="avatar">${escapeHtml(message.initial || initial(message.author))}</div>
+            <div class="avatar-wrapper">
+                <div class="avatar" style="width:36px;height:36px;font-size:13px">${escapeHtml(message.initial || initial(message.author))}</div>
+            </div>
             <div class="bubble">
                 <header>
                     <strong>${escapeHtml(message.author)}</strong>
@@ -322,7 +457,10 @@ function renderMessages() {
 function userRows(users) {
     return users.map((user) => `
         <div class="user-row">
-            <div class="avatar">${escapeHtml(initial(user.name))}</div>
+            <div class="avatar-wrapper">
+                <div class="avatar">${escapeHtml(initial(user.name))}</div>
+                <span class="status-dot"></span>
+            </div>
             <div>
                 <strong>${escapeHtml(user.name)}</strong>
                 <small>${escapeHtml(user.status || "En linea")}</small>
@@ -337,7 +475,10 @@ function voiceUserRows(users) {
     }
     return users.map((user) => `
         <div class="voice-user-card">
-            <div class="avatar">${escapeHtml(initial(user.name))}</div>
+            <div class="avatar-wrapper">
+                <div class="avatar voice-user-avatar">${escapeHtml(initial(user.name))}</div>
+                <span class="status-dot"></span>
+            </div>
             <div>
                 <strong>${escapeHtml(user.name)}</strong>
                 <small>${escapeHtml(voiceStateLabel(user))}</small>
@@ -352,11 +493,14 @@ function voiceUserRows(users) {
 function renderUsers() {
     const users = state.users.length ? state.users : [{ name: username, status: "En el servidor" }];
     connectedCount.textContent = `${users.length} conectado${users.length === 1 ? "" : "s"}`;
-    voiceUsers.innerHTML = voiceUserRows(state.voiceUsers.length ? state.voiceUsers : []);
+    renderVoiceUsers();
     sideFriendsList.innerHTML = userRows(users);
     friendsList.innerHTML = users.map((user) => `
         <article class="friend-card">
-            <div class="avatar">${escapeHtml(initial(user.name))}</div>
+            <div class="avatar-wrapper">
+                <div class="avatar">${escapeHtml(initial(user.name))}</div>
+                <span class="status-dot"></span>
+            </div>
             <div>
                 <strong>${escapeHtml(user.name)}</strong>
                 <small>${escapeHtml(user.status || "En linea")}</small>
@@ -423,8 +567,15 @@ function renderQueue() {
     progress.value = state.progress || 0;
 
     if (song.source === "audio" && song.url) {
-        if (audioPlayer.src !== song.url) audioPlayer.src = song.url;
+        const nextSrc = new URL(song.url, location.href).href;
+        if (audioPlayer.src !== nextSrc) {
+            audioPlayer.src = song.url;
+            audioPlayer.load();
+            pendingAudioPlay = state.playing;
+        }
     } else {
+        pendingAudioPlay = false;
+        window.clearTimeout(audioRetryTimer);
         audioPlayer.pause();
         audioPlayer.removeAttribute("src");
         audioPlayer.load();
@@ -520,9 +671,53 @@ function updateCurrentTime() {
     currentTime.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
+function syncAudioPosition() {
+    const duration = Number.isFinite(audioPlayer.duration) ? audioPlayer.duration : 0;
+    if (!duration) return;
+    const nextTime = (Number(progress.value) / 100) * duration;
+    if (Math.abs(audioPlayer.currentTime - nextTime) > 2) audioPlayer.currentTime = nextTime;
+}
+
+function queueAudioPlayRetry(delay = 900) {
+    window.clearTimeout(audioRetryTimer);
+    audioRetryTimer = window.setTimeout(() => {
+        if (pendingAudioPlay && state.playing) playAudioDirect(true);
+    }, delay);
+}
+
+function playAudioDirect(isRetry = false) {
+    if (!state.playing) return;
+    pendingAudioPlay = true;
+    syncAudioPosition();
+    const playPromise = audioPlayer.play();
+    if (!playPromise?.catch) {
+        pendingAudioPlay = false;
+        return;
+    }
+    playPromise
+        .then(() => {
+            pendingAudioPlay = false;
+            lastAudioPlayError = 0;
+        })
+        .catch(() => {
+            pendingAudioPlay = true;
+            if (document.hidden) {
+                queueAudioPlayRetry(1200);
+                return;
+            }
+            if (!isRetry || Date.now() - lastAudioPlayError > 3000) {
+                lastAudioPlayError = Date.now();
+                showToast("El navegador freno el audio. Toca Play una vez para reactivarlo.");
+            } else {
+                queueAudioPlayRetry(900);
+            }
+        });
+}
+
 function syncMusicFromState(autoplayEmbed = false) {
     const song = state.songs[state.activeSong] || state.songs[0];
     progress.value = state.progress || 0;
+    renderVoiceMusicPlayer();
     renderQueue();
     updateCurrentTime();
     playPause.textContent = state.playing ? "Pausa" : "Play";
@@ -538,14 +733,11 @@ function syncMusicFromState(autoplayEmbed = false) {
 
     if (song.source === "audio" && song.url) {
         stopGeneratedMusic();
-        const duration = Number.isFinite(audioPlayer.duration) ? audioPlayer.duration : 0;
-        if (duration) {
-            const nextTime = (Number(progress.value) / 100) * duration;
-            if (Math.abs(audioPlayer.currentTime - nextTime) > 2) audioPlayer.currentTime = nextTime;
-        }
         if (state.playing) {
-            audioPlayer.play().catch(() => showToast("El navegador bloqueo el audio. Toca Play otra vez."));
+            playAudioDirect(false);
         } else {
+            pendingAudioPlay = false;
+            window.clearTimeout(audioRetryTimer);
             audioPlayer.pause();
         }
         return;
@@ -577,11 +769,8 @@ function addSongFromUrl(url) {
 
     if (!sendSocket("song-add", { song })) {
         state.songs.push(song);
-        state.activeSong = state.songs.length - 1;
-        state.progress = 0;
-        state.playing = true;
         renderQueue();
-        syncMusicFromState(false);
+        renderVoiceMusicPlayer();
     }
     songUrl.value = "";
     switchView("music");
@@ -690,9 +879,14 @@ async function startVoice() {
     sendSocket("voice-state", { micMuted, audioMuted });
     sendSocket("status", { status: "En llamada" });
     connectVoiceToUsers();
+    startVoiceActivityDetection();
 }
 
 function stopVoice() {
+    stopVoiceActivityDetection();
+    voiceAnalyserNodes.forEach(({ ctx }) => ctx.close());
+    voiceAnalyserNodes.clear();
+    speakingUsers.clear();
     resetVoicePeers();
     if (localStream) {
         localStream.getTracks().forEach((track) => track.stop());
@@ -754,6 +948,8 @@ function applyMusicState(data, autoplay = false) {
     state.progress = Math.max(0, Math.min(100, Number(data.progress) || 0));
     state.voiceUsers = data.users || state.voiceUsers;
     renderUsers();
+    renderVoiceUsers();
+    renderVoiceMusicPlayer();
     syncMusicFromState(autoplay);
     connectVoiceToUsers();
 }
@@ -785,6 +981,8 @@ function connect() {
         renderTextChannels();
         renderMessages();
         renderQueue();
+        renderVoiceMusicPlayer();
+        renderVoiceUsers();
         renderUsers();
         updateInviteText();
         return;
@@ -969,8 +1167,9 @@ callBtn.addEventListener("click", () => {
 });
 
 document.getElementById("muteBtn").addEventListener("click", (event) => {
+    event.currentTarget.classList.toggle("mic-muted");
     event.currentTarget.classList.toggle("active");
-    micMuted = event.currentTarget.classList.contains("active");
+    micMuted = event.currentTarget.classList.contains("mic-muted");
     if (localStream) localStream.getAudioTracks().forEach((track) => { track.enabled = !micMuted; });
     playVoiceEventSound(micMuted ? "mute" : "unmute");
     sendSocket("voice-state", { micMuted, audioMuted });
@@ -978,8 +1177,9 @@ document.getElementById("muteBtn").addEventListener("click", (event) => {
 });
 
 document.getElementById("deafenBtn").addEventListener("click", (event) => {
+    event.currentTarget.classList.toggle("audio-off");
     event.currentTarget.classList.toggle("active");
-    audioMuted = event.currentTarget.classList.contains("active");
+    audioMuted = event.currentTarget.classList.contains("audio-off");
     setRemoteMuted();
     playVoiceEventSound(audioMuted ? "deafen" : "undeafen");
     sendSocket("voice-state", { micMuted, audioMuted });
@@ -1018,6 +1218,69 @@ songUrl.addEventListener("keydown", (event) => {
 
 document.getElementById("focusSongInput").addEventListener("click", () => songUrl.focus());
 
+vmpPlayPause.addEventListener("click", () => {
+    const song = state.songs[state.activeSong] || state.songs[0];
+    state.playing = !state.playing;
+    if (state.playing) ensureAudioContext();
+    sendSocket("music", { activeSong: state.activeSong, progress: Number(vmpProgress.value), playing: state.playing });
+    syncMusicFromState(false);
+});
+
+vmpPrev.addEventListener("click", () => {
+    const idx = (state.activeSong - 1 + state.songs.length) % state.songs.length;
+    state.activeSong = idx;
+    state.progress = 0;
+    sendSocket("music", { activeSong: idx, progress: 0, playing: state.playing });
+    syncMusicFromState(false);
+});
+
+vmpNext.addEventListener("click", () => {
+    const idx = (state.activeSong + 1) % state.songs.length;
+    state.activeSong = idx;
+    state.progress = 0;
+    sendSocket("music", { activeSong: idx, progress: 0, playing: state.playing });
+    syncMusicFromState(false);
+});
+
+vmpLoadBtn.addEventListener("click", () => {
+    const url = vmpSongUrl.value.trim();
+    if (!url) return;
+    addSongFromUrl(url);
+    vmpSongUrl.value = "";
+});
+
+vmpSongUrl.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+        event.preventDefault();
+        vmpLoadBtn.click();
+    }
+});
+
+vmpQueueList.addEventListener("click", (event) => {
+    const item = event.target.closest("[data-vmp-song]");
+    if (!item) return;
+    const idx = Number(item.dataset.vmp-song);
+    state.activeSong = idx;
+    state.progress = 0;
+    sendSocket("music", { activeSong: idx, progress: 0, playing: state.playing });
+    syncMusicFromState(false);
+});
+
+vmpProgress.addEventListener("input", () => {
+    state.progress = Number(vmpProgress.value);
+    const duration = Number.isFinite(audioPlayer.duration) ? audioPlayer.duration : 198;
+    const seconds = Math.round((Number(vmpProgress.value) / 100) * duration);
+    vmpCurrentTime.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+});
+
+vmpProgress.addEventListener("change", () => {
+    sendSocket("music", { activeSong: state.activeSong, progress: Number(vmpProgress.value), playing: state.playing });
+});
+
+callBtnMini.addEventListener("click", () => {
+    if (inCall) stopVoice();
+});
+
 queueList.addEventListener("click", (event) => {
     const songButton = event.target.closest("[data-song]");
     if (!songButton) return;
@@ -1033,10 +1296,46 @@ progress.addEventListener("change", () => {
     sendSocket("music", { activeSong: state.activeSong, progress: Number(progress.value), playing: state.playing });
 });
 
+document.addEventListener("visibilitychange", () => {
+    if (document.hidden) return;
+    if (!state.playing) return;
+    const song = state.songs[state.activeSong] || state.songs[0];
+    if (song.source === "audio" && song.url) {
+        if (audioPlayer.paused || pendingAudioPlay) {
+            syncAudioPosition();
+            playAudioDirect(true);
+        }
+        return;
+    }
+    if (song.source === "youtube" && song.videoId) {
+        hideFrames();
+        syncEmbed(song, true);
+        return;
+    }
+    if (song.source === "spotify" && song.embedUrl) {
+        hideFrames();
+        syncEmbed(song, true);
+    }
+});
+
 audioPlayer.addEventListener("loadedmetadata", () => {
     const minutes = Math.floor(audioPlayer.duration / 60);
     const rest = String(Math.floor(audioPlayer.duration % 60)).padStart(2, "0");
     totalTime.textContent = `${minutes}:${rest}`;
+    syncAudioPosition();
+});
+
+audioPlayer.addEventListener("canplay", () => {
+    if (pendingAudioPlay && state.playing) playAudioDirect(true);
+});
+
+audioPlayer.addEventListener("playing", () => {
+    pendingAudioPlay = false;
+    window.clearTimeout(audioRetryTimer);
+});
+
+audioPlayer.addEventListener("pause", () => {
+    if (!state.playing) pendingAudioPlay = false;
 });
 
 audioPlayer.addEventListener("timeupdate", () => {
@@ -1062,6 +1361,8 @@ renderProfile();
 renderTextChannels();
 renderMessages();
 renderQueue();
+renderVoiceMusicPlayer();
+renderVoiceUsers();
 renderUsers();
 updateCurrentTime();
 updateInviteText();

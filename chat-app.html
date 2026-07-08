@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.1/css/all.min.css">
-    <link rel="stylesheet" href="chat-style.css?v=4">
+    <link rel="stylesheet" href="chat-style.css?v=5">
 </head>
 <body>
     <div class="app-shell" data-view="chat">
@@ -63,7 +63,10 @@
             </section>
 
             <footer class="user-strip">
-                <div class="avatar self" id="selfInitial">A</div>
+                <div class="avatar-wrapper">
+                    <div class="avatar self" id="selfInitial">A</div>
+                    <span class="status-dot"></span>
+                </div>
                 <div>
                     <strong id="selfName">Agustin</strong>
                     <small id="voiceStatus">Desconectado de voz</small>
@@ -99,25 +102,52 @@
                         <span class="eyebrow">Canal de voz</span>
                         <h2 id="voiceChannelTitle">Lobby de voz</h2>
                     </div>
-                    <button id="callBtn" class="primary-action" type="button">Entrar a voz</button>
+                    <div class="voice-top-actions">
+                        <button id="callBtn" class="primary-action" type="button">Entrar a voz</button>
+                    </div>
                 </header>
 
                 <div class="voice-stage">
-                    <div class="voice-hero">
-                        <div class="pulse-ring"><i class="fa-solid fa-microphone-lines"></i></div>
-                        <h3>Habla dentro de este canal</h3>
-                        <p id="micHelp">La voz solo se conecta con personas del mismo servidor privado y del mismo canal de voz.</p>
-                        <div id="voiceRoomStats" class="voice-room-stats"></div>
-                        <div class="voice-actions">
-                            <button id="muteBtn" class="control-action" type="button"><i class="fa-solid fa-microphone"></i> Microfono</button>
-                            <button id="deafenBtn" class="control-action" type="button"><i class="fa-solid fa-volume-xmark"></i> Silenciar audio</button>
-                            <button id="copyMicHelp" class="control-action" type="button"><i class="fa-solid fa-copy"></i> Copiar ayuda</button>
+                    <div class="voice-music-area">
+                        <div class="voice-music-player" id="voiceMusicPlayer">
+                            <div class="vmp-header">
+                                <div>
+                                    <span class="eyebrow">Musica del canal</span>
+                                    <strong id="vmpSongTitle">Sin cancion</strong>
+                                    <small id="vmpSongArtist">Agrega un link</small>
+                                </div>
+                                <div class="vmp-controls">
+                                    <button id="vmpPrev" class="vmp-btn" type="button" title="Anterior"><i class="fa-solid fa-backward-step"></i></button>
+                                    <button id="vmpPlayPause" class="vmp-play-btn" type="button" title="Play/Pausa"><i class="fa-solid fa-play"></i></button>
+                                    <button id="vmpNext" class="vmp-btn" type="button" title="Siguiente"><i class="fa-solid fa-forward-step"></i></button>
+                                </div>
+                            </div>
+                            <div class="vmp-progress">
+                                <span id="vmpCurrentTime">0:00</span>
+                                <input id="vmpProgress" type="range" min="0" max="100" value="0">
+                                <span id="vmpTotalTime">--:--</span>
+                            </div>
+                            <div class="vmp-actions">
+                                <button id="muteBtn" class="control-action" type="button"><i class="fa-solid fa-microphone"></i> Microfono</button>
+                                <button id="deafenBtn" class="control-action" type="button"><i class="fa-solid fa-volume-xmark"></i> Silenciar audio</button>
+                                <button id="callBtnMini" type="button" class="control-action"><i class="fa-solid fa-phone-slash"></i> Salir</button>
+                            </div>
+                        </div>
+                        <div class="voice-music-add">
+                            <input id="vmpSongUrl" type="url" placeholder="Pega link de YouTube, Spotify o MP3">
+                            <button id="vmpLoadBtn" type="button">Agregar</button>
+                        </div>
+                        <div class="voice-music-queue" id="vmpQueue">
+                            <div class="vmp-queue-label"><i class="fa-solid fa-list"></i> Cola de musica</div>
+                            <div class="vmp-queue-list" id="vmpQueueList"></div>
                         </div>
                     </div>
 
-                    <div class="voice-list-card">
-                        <div class="mini-title"><i class="fa-solid fa-users"></i> En la sala</div>
-                        <div id="voiceUsers" class="voice-users"></div>
+                    <div class="voice-users-area">
+                        <div class="voice-users-header">
+                            <i class="fa-solid fa-users"></i> En la sala (<span id="voiceUserCount">0</span>)
+                        </div>
+                        <div id="voiceUsersList" class="voice-users-list"></div>
                     </div>
                 </div>
             </section>
@@ -210,8 +240,10 @@
         <aside class="right-panel">
             <section class="mini-card now-card">
                 <div class="mini-title"><i class="fa-solid fa-record-vinyl"></i> Ahora</div>
-                <strong id="sideSongTitle">Midnight Match</strong>
-                <small id="sideSongArtist">Neon Route</small>
+                <div class="side-song-info">
+                    <strong id="sideSongTitle">Midnight Match</strong>
+                    <small id="sideSongArtist">Neon Route</small>
+                </div>
                 <button class="soft-action rail-nav" data-view="music" type="button">Abrir musica</button>
             </section>
 
@@ -226,6 +258,6 @@
     <div id="remoteAudio" class="remote-audio" aria-hidden="true"></div>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <script src="chat-script.js?v=4"></script>
+    <script src="chat-script.js?v=5"></script>
 </body>
 </html>

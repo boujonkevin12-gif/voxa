@@ -6,6 +6,7 @@ const path = require("path");
 
 const PORT = Number(process.env.PORT) || 3000;
 const ROOT = __dirname;
+const DATA_FILE = path.join(__dirname, "voxa-data.json");
 const MAX_MESSAGES_PER_CHANNEL = 120;
 const MAX_SONGS_PER_CHANNEL = 80;
 
@@ -13,6 +14,34 @@ let nextClientId = 1;
 
 const sockets = new Map();
 const servers = new Map();
+
+function homeCode() {
+    const hash = crypto.createHash("sha256").update(os.hostname()).digest("hex");
+    return hash.substring(0, 8).toUpperCase();
+}
+
+function saveServers() {
+    const data = { servers: [] };
+    for (const [id, server] of servers) {
+        data.servers.push({ id, server });
+    }
+    try { fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2)); } catch {}
+}
+
+function loadServers() {
+    try {
+        const raw = fs.readFileSync(DATA_FILE, "utf8");
+        const data = JSON.parse(raw);
+        if (data.servers) {
+            for (const { id, server } of data.servers) {
+                servers.set(id, server);
+            }
+        }
+        if (data.servers) console.log(`Restaurados ${data.servers.length} servidores.`);
+    } catch {
+        console.log("No hay datos previos, creando servidor base...");
+    }
+}
 
 const textChannels = [
     { id: "general", name: "General" },
@@ -33,6 +62,8 @@ const fallbackSongs = [
 ];
 
 function makeCode() {
+    const home = homeCode();
+    if (!servers.has(home)) return home;
     let code = "";
     do {
         code = crypto.randomBytes(4).toString("hex").toUpperCase();
@@ -111,6 +142,7 @@ function createPrivateServer(name, owner) {
         createdAt: Date.now()
     };
     servers.set(id, server);
+    saveServers();
     return server;
 }
 
@@ -583,19 +615,16 @@ function handleMessage(socket, data, request) {
             videoId: String(data.song.videoId || "").slice(0, 32),
             embedUrl: String(data.song.embedUrl || "").slice(0, 500)
         };
-        music.songs.push(song);
-        music.songs = music.songs.slice(-MAX_SONGS_PER_CHANNEL);
-        music.activeSong = music.songs.length - 1;
-        music.playing = true;
-        music.progress = 0;
-        music.updatedAt = Date.now();
-        broadcastChannel(server.id, client.voiceChannel, {
-            type: "song-added",
-            channel: client.voiceChannel,
-            by: client.name,
-            title: song.title
-        });
-        broadcastMusicState(server, client.voiceChannel, { autoplay: true });
+    music.songs.push(song);
+    music.songs = music.songs.slice(-MAX_SONGS_PER_CHANNEL);
+    music.updatedAt = Date.now();
+    broadcastChannel(server.id, client.voiceChannel, {
+        type: "song-added",
+        channel: client.voiceChannel,
+        by: client.name,
+        title: song.title
+    });
+    broadcastMusicState(server, client.voiceChannel);
         return;
     }
 
@@ -689,7 +718,9 @@ webServer.on("upgrade", (request, socket) => {
     socket.on("end", () => cleanupSocket(socket));
 });
 
+loadServers();
 webServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Voxa listo en http://localhost:${PORT}/chat-app.html`);
     console.log(`Para amigos en la misma red: http://${localIp()}:${PORT}/chat-app.html`);
+    console.log(`Codigo de este servidor: ${homeCode()}`);
 });
