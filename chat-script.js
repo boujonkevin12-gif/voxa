@@ -1,3 +1,7 @@
+// Config: para GitHub Pages + Render, poné acá la URL de tu Web Service de Render.
+// Si está vacío, usa location.host (local / ngrok / Render sirviendo todo).
+const WS_HOST = ""; // ej: "miprojecto.onrender.com"
+
 const fallbackMessages = {
     general: [
         { author: "Sistema", initial: "S", text: "Servidor privado listo. Comparte la invitacion para que entren tus amigos.", time: "Ahora" }
@@ -519,7 +523,22 @@ function hideFrames() {
 function youtubeEmbedSrc(song, autoplay = false) {
     const start = song.progressSeconds ? `&start=${Math.max(0, Math.floor(song.progressSeconds))}` : "";
     const auto = autoplay ? "&autoplay=1&mute=0" : "";
-    return `https://www.youtube.com/embed/${encodeURIComponent(song.videoId)}?rel=0&playsinline=1${auto}${start}`;
+    return `https://www.youtube.com/embed/${encodeURIComponent(song.videoId)}?rel=0&playsinline=1&enablejsapi=1${auto}${start}`;
+}
+
+function nextTrack(autoplay = true) {
+    const nextIndex = (state.activeSong + 1) % state.songs.length;
+    if (nextIndex === 0 && state.activeSong === state.songs.length - 1) {
+        state.playing = false;
+        state.progress = 0;
+        sendSocket("music", { activeSong: state.activeSong, progress: 0, playing: false });
+        syncMusicFromState(false);
+        return;
+    }
+    state.activeSong = nextIndex;
+    state.progress = 0;
+    sendSocket("music", { activeSong: nextIndex, progress: 0, playing: autoplay });
+    syncMusicFromState(autoplay);
 }
 
 function syncEmbed(song, autoplay = false) {
@@ -806,11 +825,20 @@ function addRemoteStream(peerId, stream) {
     audio.play().catch(() => showToast("Toca la pagina para activar el audio de voz"));
 }
 
+const ICE_SERVERS = [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+    { urls: "stun:stun2.l.google.com:19302" },
+    { urls: "stun:stun3.l.google.com:19302" },
+    { urls: "stun:stun4.l.google.com:19302" },
+    { urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
+    { urls: "turn:openrelay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
+    { urls: "turn:openrelay.metered.ca:80?transport=tcp", username: "openrelayproject", credential: "openrelayproject" }
+];
+
 function createPeer(peerId, shouldOffer) {
     if (!localStream || peers.has(peerId) || peerId === currentUserId) return peers.get(peerId);
-    const peer = new RTCPeerConnection({
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-    });
+    const peer = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     localStream.getTracks().forEach((track) => peer.addTrack(track, localStream));
     peer.addEventListener("icecandidate", (event) => {
         if (event.candidate) sendSocket("signal", { to: peerId, signal: { candidate: event.candidate } });
@@ -821,6 +849,9 @@ function createPeer(peerId, shouldOffer) {
             peer.close();
             peers.delete(peerId);
             document.getElementById(`voice-${peerId}`)?.remove();
+            if (inCall && localStream) {
+                createPeer(peerId, shouldOffer);
+            }
         }
     });
     peers.set(peerId, peer);
@@ -887,12 +918,12 @@ function stopVoice() {
     voiceAnalyserNodes.forEach(({ ctx }) => ctx.close());
     voiceAnalyserNodes.clear();
     speakingUsers.clear();
+    inCall = false;
     resetVoicePeers();
     if (localStream) {
         localStream.getTracks().forEach((track) => track.stop());
         localStream = null;
     }
-    inCall = false;
     callBtn.textContent = "Entrar a voz";
     voiceStatus.textContent = "Desconectado de voz";
     playVoiceEventSound("leave");
@@ -987,7 +1018,9 @@ function connect() {
         updateInviteText();
         return;
     }
-    socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`);
+    const params = new URLSearchParams(location.search);
+    const wsHost = WS_HOST || params.get("ws") || location.host;
+    socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${wsHost}`);
     socket.addEventListener("open", () => {
         connectionText.textContent = "Conectando al servidor privado...";
         joinPrivateServer({ serverId: getRequestedServerId(), mode: "auto" });
@@ -1298,24 +1331,38 @@ progress.addEventListener("change", () => {
 
 document.addEventListener("visibilitychange", () => {
     if (document.hidden) return;
-    if (!state.playing) return;
+
     const song = state.songs[state.activeSong] || state.songs[0];
-    if (song.source === "audio" && song.url) {
-        if (audioPlayer.paused || pendingAudioPlay) {
-            syncAudioPosition();
-            playAudioDirect(true);
+
+    if (state.playing) {
+        if (song.source === "audio" && song.url) {
+            if (audioPlayer.paused || pendingAudioPlay) {
+                syncAudioPosition();
+                playAudioDirect(true);
+            }
+        } else if (song.source === "youtube" && song.videoId) {
+            hideFrames();
+            syncEmbed(song, true);
+        } else if (song.source === "spotify" && song.embedUrl) {
+            hideFrames();
+            syncEmbed(song, true);
+        } else {
+            stopGeneratedMusic();
+            startGeneratedMusic();
         }
-        return;
     }
-    if (song.source === "youtube" && song.videoId) {
-        hideFrames();
-        syncEmbed(song, true);
-        return;
+
+    if (audioContext?.state === "suspended") audioContext.resume();
+
+    for (const { ctx } of voiceAnalyserNodes.values()) {
+        if (ctx.state === "suspended") ctx.resume();
     }
-    if (song.source === "spotify" && song.embedUrl) {
-        hideFrames();
-        syncEmbed(song, true);
-    }
+
+    remoteAudio.querySelectorAll("audio").forEach((audio) => {
+        if (audio.paused && audio.srcObject) {
+            audio.play().catch(() => {});
+        }
+    });
 });
 
 audioPlayer.addEventListener("loadedmetadata", () => {
@@ -1345,6 +1392,20 @@ audioPlayer.addEventListener("timeupdate", () => {
     progress.value = state.progress;
     updateCurrentTime();
     sendSocket("music", { activeSong: state.activeSong, progress: state.progress, playing: state.playing });
+});
+
+audioPlayer.addEventListener("ended", () => {
+    if (state.playing) nextTrack(true);
+});
+
+window.addEventListener("message", (event) => {
+    if (event.origin !== "https://www.youtube.com") return;
+    try {
+        const data = JSON.parse(event.data);
+        if (data.event === "onStateChange" && data.info === 0) {
+            if (state.playing) nextTrack(true);
+        }
+    } catch {}
 });
 
 document.getElementById("saveNameBtn").addEventListener("click", () => {
